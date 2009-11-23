@@ -1,10 +1,11 @@
 #!/usr/bin/env ruby
 
-gem 'main',      '~> 4.2'
-gem 'fattr',     '~> 2.1'
-gem 'highline',  '~> 1.5'
-gem 'right_aws', '~> 1.10'
+gem 'main',        '~> 4.2'
+gem 'fattr',       '~> 2.1'
+gem 'highline',    '~> 1.5'
+gem 'right_aws',   '~> 1.10'
 gem 'progressbar', '~> 0.0.3'
+gem 'libxml-ruby', '~> 1.1'
 
 require 'main'
 require 'highline/import'
@@ -14,6 +15,7 @@ require 'progressbar'
 require 'pstore'
 require 'pathname'
 require 'fileutils'
+require 'yaml'
 
 module SimpleDB
   class Operation
@@ -74,7 +76,7 @@ module SimpleDB
 
     def item_names
       return @item_names if @item_names
-      query = Operation.new(@sdb, :query, @name)
+      query = Operation.new(@sdb, :query, @name, nil, nil)
       @item_names = query.inject([]) {|names, results| 
         names.concat(results[:items])
         names
@@ -112,10 +114,9 @@ module SimpleDB
     def initialize(domain, filename)
       @domain                   = domain
       @dump_filename            = Pathname(filename)
-      @status                   = PStore.new(status_filename.to_s)
-      unless status_filename.exist?
-        initialize_status!
-      end
+      @task                     = Task.new(status_filename) {
+        @domain.item_names
+      }
     end
 
     def status_filename
@@ -125,16 +126,16 @@ module SimpleDB
     end
 
     def incomplete_count
-      @status.transaction(true) {|status|
-        Array(status[:incomplete_items]).size
-      }
+      @task.incomplete_count
     end
 
     def start!
-      until (chunk = next_chunk).empty?
-        items = @domain.items(chunk)
-        items.each do
+      @task.session do
+        until (chunk = @task.reserve_items!(chunk_size)).empty?
+          items = @domain.items(chunk)
           dump_items(items)
+          @task.finish_items!(chunk)
+          items.each do |item| callback.call(item) end
         end
       end
     end
@@ -148,32 +149,77 @@ module SimpleDB
       @dump_filename.open('a+') do |f|
         items.each_pair do |item_name, attributes|
           YAML.dump({item_name => attributes}, f)
-          finish_item!(item_name)
         end
       end
     ensure
         file.flock(File::LOCK_UN)
     end
 
-    def initialize_status!
-      @status.transaction(false) do |status|
-        status[:incomplete_items] = @domain.item_names
-        status[:complete_items]   = []
+  end
+
+  class Task
+    def initialize(status_file)
+      @status_file = Pathname(status_file)
+      @status = PStore.new(@status_file.to_s)
+      unless @status_file.exist?
+        initialize_status!(yield)
+      end
+      @status.transaction(false) do
+        @status[$$] = {}
+        @status[$$][:working_items] = []
       end
     end
 
-    def next_chunk
+    def session
+      yield
+    ensure
+      release_working_items!
+    end
+
+    def incomplete_count
+      @status.transaction(true) {|status|
+        Array(status[:incomplete_items]).size
+      }
+    end
+
+    def reserve_items!(size)
       @status.transaction(false) do |status|
-        chunk = status[:incomplete_items].slice(0,chunk_size)
+        chunk = status[:incomplete_items].slice!(0,size)
+        status[$$][:working_items].concat(chunk)
         chunk
       end
     end
 
-    def finish_item!(item_name)
+    def finish_items!(items)
       @status.transaction(false) do |status|
-        status[:complete_items] << status[:incomplete_items].delete(item_name)
+        items.each do |item_name|
+          status[:complete_items] << 
+            status[$$][:working_items].delete(item_name)
+        end
       end
-      callback.call(item_name)
+    end
+
+    def release_working_items!
+      @status.transaction(false) do |status|
+        items = status[$$][:working_items]
+        status[:incomplete_items].concat(items)
+        status[$$][:working_items].clear
+      end
+    end
+
+    def report
+      @status.transaction(true) do |status|
+        status.to_yaml
+      end
+    end
+
+    private
+    
+    def initialize_status!(item_names)
+      @status.transaction(false) do |status|
+        status[:incomplete_items] = item_names
+        status[:complete_items]   = []
+      end
     end
   end
 end
@@ -189,6 +235,7 @@ Main do
 
   def initialize
     HighLine.track_eof = false
+    RightAws::RightAWSParser.xml_lib = 'libxml'
   end
 
   def timestamp
@@ -275,7 +322,7 @@ Main do
         :nil_representation => params['nil-rep'].value,
         :protocol => params['protocol'].value)
       self.domain ||= choose(*@db.domains) do |q|
-        q.prompt = "Domain to dump?"
+        q.prompt = "Domain to operate on?"
       end
     end
 
@@ -302,9 +349,9 @@ Main do
       self.filename ||= ask("Filename for this dump?") do |q|
         q.default = "#{domain}-#{timestamp}.yaml"
       end
-      domain = @db.domain(params['domain'].value)
-      logger.info "Preparing to dump domain #{domain.name}"
-      dump = @db.make_dump(domain, filename)
+      dump_domain = @db.domain(domain)
+      logger.info "Preparing to dump domain #{dump_domain.name}"
+      dump = @db.make_dump(dump_domain, filename)
       dump.chunk_size = params['chunk-size'].value
       count = dump.incomplete_count
       logger.info "Dumping #{count} objects to #{filename}"
@@ -326,6 +373,27 @@ Main do
     def run
       domain = @db.domain(params['domain'].value)
       puts domain.count
+    end
+  end
+
+  mode 'status' do
+    description 'Show the status of an operation'
+    
+    argument 'title' do
+      description 'The title of the operation'
+      optional
+      attr
+    end
+
+    def run
+      self.title ||= choose(*Dir['*.simpledb_op_status'])
+      status_file = if title =~ /\.simpledb_op_status$/
+                      title
+                    else
+                      title + '.simpledb_op_status'
+                    end
+      task = SimpleDB::Task.new(status_file)
+      puts task.report
     end
   end
 
