@@ -1,0 +1,335 @@
+#!/usr/bin/env ruby
+
+gem 'main',      '~> 4.2'
+gem 'fattr',     '~> 2.1'
+gem 'highline',  '~> 1.5'
+gem 'right_aws', '~> 1.10'
+gem 'progressbar', '~> 0.0.3'
+
+require 'main'
+require 'highline/import'
+require 'fattr'
+require 'right_aws'
+require 'progressbar'
+require 'pstore'
+require 'pathname'
+require 'fileutils'
+
+module SimpleDB
+  class Operation
+    include Enumerable
+
+    def initialize(sdb, method, *args)
+      @sdb    = sdb
+      @method = method
+      @args   = args
+    end
+
+    def each
+      next_token = nil
+      begin
+        args = @args.dup
+        args << next_token
+        results = @sdb.send(@method, *args)
+        yield(results)
+        next_token = results[:next_token]
+      end while next_token
+    end
+
+  end
+
+  class Database
+    def initialize(access_key=nil, secret_key=nil, options={})
+      @sdb = RightAws::SdbInterface.new(access_key, secret_key, options)
+    end
+
+    def domains
+      domains_op = Operation.new(@sdb, :list_domains, nil)
+      domains_op.inject([]) {|domains, results|
+        domains.concat(results[:domains])
+        domains
+      }
+    end
+
+    def domain(domain_name)
+      Domain.new(@sdb, domain_name)
+    end
+
+    def make_dump(domain, filename)
+      Dump.new(domain, filename)
+    end
+
+    private
+  end
+
+  class Domain
+    attr_reader :name
+
+    def initialize(sdb, name)
+      @sdb        = sdb
+      @name       = name
+      @item_names = nil
+      @count      = nil
+    end
+
+    def item_names
+      return @item_names if @item_names
+      query = Operation.new(@sdb, :query, @name)
+      @item_names = query.inject([]) {|names, results| 
+        names.concat(results[:items])
+        names
+      }
+    end
+
+    def count
+      return @count if @count
+      op = Operation.new(@sdb, :select, "select count(*) from #{name}")
+      @count = op.inject(0) {|count, results|
+        count += results[:items].first["Domain"]["Count"].first.to_i
+        count
+      }
+    end
+
+    def items(item_names)
+      names  = item_names.map{|n| "'#{n}'"}.join(', ')
+      query  = "select * from #{name} where itemName() in (#{names})"
+      select = Operation.new(@sdb, :select, query)
+      select.inject({}) {|items, results|
+        results[:items].each do |item|
+          item_name  = item.keys.first
+          item_value = item.values.first
+          items[item_name] = item_value
+        end
+        items
+      }
+    end
+  end
+
+  class Dump
+    fattr :callback    => lambda{}
+    fattr :chunk_size  => 100
+
+    def initialize(domain, filename)
+      @domain                   = domain
+      @dump_filename            = Pathname(filename)
+      @status                   = PStore.new(status_filename.to_s)
+      unless status_filename.exist?
+        initialize_status!
+      end
+    end
+
+    def status_filename
+      Pathname(
+        @dump_filename.basename(@dump_filename.extname).to_s + 
+        ".simpledb_op_status")
+    end
+
+    def incomplete_count
+      @status.transaction(true) {|status|
+        Array(status[:incomplete_items]).size
+      }
+    end
+
+    def start!
+      until (chunk = next_chunk).empty?
+        items = @domain.items(chunk)
+        items.each do
+          dump_items(items)
+        end
+      end
+    end
+
+    private
+
+    def dump_items(items)
+      FileUtils.touch(@dump_filename) unless @dump_filename.exist?
+      file = File.new(@dump_filename.to_s)
+      file.flock(File::LOCK_EX)
+      @dump_filename.open('a+') do |f|
+        items.each_pair do |item_name, attributes|
+          YAML.dump({item_name => attributes}, f)
+          finish_item!(item_name)
+        end
+      end
+    ensure
+        file.flock(File::LOCK_UN)
+    end
+
+    def initialize_status!
+      @status.transaction(false) do |status|
+        status[:incomplete_items] = @domain.item_names
+        status[:complete_items]   = []
+      end
+    end
+
+    def next_chunk
+      @status.transaction(false) do |status|
+        chunk = status[:incomplete_items].slice(0,chunk_size)
+        chunk
+      end
+    end
+
+    def finish_item!(item_name)
+      @status.transaction(false) do |status|
+        status[:complete_items] << status[:incomplete_items].delete(item_name)
+      end
+      callback.call(item_name)
+    end
+  end
+end
+
+Main do
+  description 'A tool for working with Amazon SimpleDB'
+
+  class NullObject
+    def methods_missing(*args, &block)
+      self
+    end
+  end
+
+  def initialize
+    HighLine.track_eof = false
+  end
+
+  def timestamp
+    Time.now.strftime('%Y%m%d%H%M')
+  end
+
+  option 'access_key' do
+    description 'Amazon AWS access key'
+    argument :required
+    default ENV.fetch('AMAZON_ACCESS_KEY_ID') {
+      ENV.fetch('AWS_ACCESS_KEY_ID')
+    }
+    attr
+  end
+
+  option 'secret_key' do
+    description 'Amazon AWS secret key'
+    argument :required
+    default ENV.fetch('AMAZON_SECRET_ACCESS_KEY') {
+      ENV.fetch('AWS_SECRET_ACCESS_KEY')
+    }
+    attr
+  end
+
+  option 'server' do
+    description 'SimpleDB server hostname'
+    argument :required
+    default 'sdb.amazonaws.com'
+  end
+
+  option 'port' do
+    description 'SimpleDB server port number'
+    argument :required
+    cast :int
+    default 443
+  end
+
+  option 'protocol' do
+    description 'SimpleDB protocol'
+    argument :required
+    default 'https'
+  end
+
+  option 'nil-rep' do
+    description 'How to represent nil values'
+    argument :required
+    default '<[<[<NIL>]>]>'
+  end
+
+  option 'progress' do
+    description "Show progress bar"
+    cast :bool
+    default true
+    attr
+  end
+
+  option 'verbose' do
+    description "Verbose output"
+    cast :bool
+    default false
+    attr
+  end
+  
+  option 'chunk-size', 'n' do
+    description "The number of items to process at once"
+    cast :int
+    default 10
+  end
+
+  mixin 'domain' do
+    argument 'domain' do
+      description 'The SimpleDB domain to work on'
+      optional
+      attr
+    end
+
+    def before_run
+      @db = SimpleDB::Database.new(
+        access_key,
+        secret_key,
+        :server => params['server'].value,
+        :port   => params['port'].value,
+        :logger => logger,
+        :nil_representation => params['nil-rep'].value,
+        :protocol => params['protocol'].value)
+      self.domain ||= choose(*@db.domains) do |q|
+        q.prompt = "Domain to dump?"
+      end
+    end
+
+  end
+
+  def after_parse_parameters
+    unless verbose
+      logger.level = ::Logger::WARN
+    end
+  end
+
+  mode 'dump' do
+    description 'Dump the contents of a domain to a file'
+
+    mixin 'domain'
+
+    argument 'filename' do
+      description 'File to dump into'
+      optional
+      attr
+    end
+
+    def run
+      self.filename ||= ask("Filename for this dump?") do |q|
+        q.default = "#{domain}-#{timestamp}.yaml"
+      end
+      domain = @db.domain(params['domain'].value)
+      logger.info "Preparing to dump domain #{domain.name}"
+      dump = @db.make_dump(domain, filename)
+      dump.chunk_size = params['chunk-size'].value
+      count = dump.incomplete_count
+      logger.info "Dumping #{count} objects to #{filename}"
+      pbar = progress ? ProgressBar.new("dump", count) : NullObject.new
+      dump.callback = lambda do |item_name|
+        logger.info "Dumped #{item_name}"
+        pbar.inc
+      end
+      dump.start!
+      pbar.finish
+      logger.info "Dump succeeded"
+    end
+  end
+
+  mode 'count' do
+    description 'Count the number of items in a domain'
+    mixin 'domain'
+
+    def run
+      domain = @db.domain(params['domain'].value)
+      puts domain.count
+    end
+  end
+
+  def run
+    help!
+  end
+end
