@@ -57,8 +57,21 @@ module SimpleDB
       Domain.new(@sdb, domain_name)
     end
 
+    def domain_exists?(domain_name)
+      domains.include?(domain_name)
+    end
+
+    def create_domain(domain_name)
+      @sdb.create_domain(domain_name)
+      domain(domain_name)
+    end
+
     def make_dump(domain, filename)
       Dump.new(domain, filename)
+    end
+
+    def make_load(domain, filename)
+      Load.new(domain, filename)
     end
 
     private
@@ -105,59 +118,16 @@ module SimpleDB
         items
       }
     end
-  end
 
-  class Dump
-    fattr :callback    => lambda{}
-    fattr :chunk_size  => 100
-
-    def initialize(domain, filename)
-      @domain                   = domain
-      @dump_filename            = Pathname(filename)
-      @task                     = Task.new(status_filename) {
-        @domain.item_names
-      }
+    def put(item_name, attributes)
+      @sdb.put_attributes(@name, item_name, attributes)
     end
-
-    def status_filename
-      Pathname(
-        @dump_filename.basename(@dump_filename.extname).to_s + 
-        ".simpledb_op_status")
-    end
-
-    def incomplete_count
-      @task.incomplete_count
-    end
-
-    def start!
-      @task.session do
-        until (chunk = @task.reserve_items!(chunk_size)).empty?
-          items = @domain.items(chunk)
-          dump_items(items)
-          @task.finish_items!(chunk)
-          items.each do |item| callback.call(item) end
-        end
-      end
-    end
-
-    private
-
-    def dump_items(items)
-      FileUtils.touch(@dump_filename) unless @dump_filename.exist?
-      file = File.new(@dump_filename.to_s)
-      file.flock(File::LOCK_EX)
-      @dump_filename.open('a+') do |f|
-        items.each_pair do |item_name, attributes|
-          YAML.dump({item_name => attributes}, f)
-        end
-      end
-    ensure
-        file.flock(File::LOCK_UN)
-    end
-
   end
 
   class Task
+    fattr :callback    => lambda{}
+    fattr :chunk_size  => 100
+
     def initialize(status_file)
       @status_file = Pathname(status_file)
       @status = PStore.new(@status_file.to_s)
@@ -169,6 +139,9 @@ module SimpleDB
         @status[$$][:working_items] = []
       end
     end
+
+    fattr :callback    => lambda{}
+    fattr :chunk_size  => 100
 
     def session
       yield
@@ -222,6 +195,107 @@ module SimpleDB
       end
     end
   end
+
+  class Dump < Task
+    def initialize(domain, filename)
+      @domain                   = domain
+      @dump_filename            = Pathname(filename)
+      super(status_filename) {
+        @domain.item_names
+      }
+    end
+
+    def status_filename
+      Pathname(
+        @dump_filename.basename(@dump_filename.extname).to_s + 
+        ".simpledb_op_status")
+    end
+
+    def start!
+      session do
+        until (chunk = reserve_items!(chunk_size)).empty?
+          items = @domain.items(chunk)
+          dump_items(items)
+          finish_items!(chunk)
+          items.each do |item| callback.call(item) end
+        end
+      end
+    end
+
+    private
+
+    def dump_items(items)
+      FileUtils.touch(@dump_filename) unless @dump_filename.exist?
+      file = File.new(@dump_filename.to_s)
+      file.flock(File::LOCK_EX)
+      @dump_filename.open('a+') do |f|
+        items.each_pair do |item_name, attributes|
+          YAML.dump({item_name => attributes}, f)
+        end
+      end
+    ensure
+        file.flock(File::LOCK_UN)
+    end
+
+  end
+
+  class Load < Task
+    def initialize(domain, filename)
+      @domain    = domain
+      @dump_filename = Pathname(filename)
+      @dump_file = DumpFile.new(filename)
+      super(status_filename) {
+        @dump_file.item_names
+      }
+    end
+
+    def status_filename
+      Pathname(
+        @dump_filename.basename(@dump_filename.extname).to_s + 
+        "-load-#{@domain.name}.simpledb_op_status")
+    end
+
+    def start!
+      session do
+        chunk    = []
+        reserved = Set.new
+        @dump_file.each do |item_name, attributes|
+          if reserved.empty?
+            finish_items!(chunk)
+            reserved.replace(chunk = reserve_items!(chunk_size))
+            break if chunk.empty?
+          end
+          if reserved.include?(item_name)
+            @domain.put(item_name, attributes)
+            reserved.delete(item_name)
+            callback.call(item_name)
+          end
+        end
+        finish_items!(chunk)
+      end
+    end
+  end
+
+  class DumpFile
+    include Enumerable
+
+    def initialize(path)
+      @path = Pathname(path)
+    end
+
+    def item_names
+      map{|item_name, item| item_name}
+    end
+
+    def each
+      @path.open('r') {|f|
+        YAML.load_documents(f) {|doc|
+          yield doc.keys.first, doc.values.first
+        }
+      }
+    end
+  end
+
 end
 
 Main do
@@ -309,24 +383,26 @@ Main do
     argument 'domain' do
       description 'The SimpleDB domain to work on'
       optional
-      attr
-    end
-
-    def before_run
-      @db = SimpleDB::Database.new(
-        access_key,
-        secret_key,
-        :server => params['server'].value,
-        :port   => params['port'].value,
-        :logger => logger,
-        :nil_representation => params['nil-rep'].value,
-        :protocol => params['protocol'].value)
-      self.domain ||= choose(*@db.domains) do |q|
-        q.prompt = "Domain to operate on?"
-      end
     end
 
   end
+
+  fattr(:domain) { 
+    params['domain'].value || choose(*db.domains) do |q|
+      q.prompt = "Domain to operate on?"
+    end
+  }
+
+  fattr(:db) {
+    SimpleDB::Database.new(
+      access_key,
+      secret_key,
+      :server => params['server'].value,
+      :port   => params['port'].value,
+      :logger => logger,
+      :nil_representation => params['nil-rep'].value,
+      :protocol => params['protocol'].value)
+  }
 
   def after_parse_parameters
     unless verbose
@@ -339,22 +415,22 @@ Main do
 
     mixin 'domain'
 
-    argument 'filename' do
+    argument 'file' do
       description 'File to dump into'
       optional
       attr
     end
 
     def run
-      self.filename ||= ask("Filename for this dump?") do |q|
+      self.file ||= ask("Filename for this dump?") do |q|
         q.default = "#{domain}-#{timestamp}.yaml"
       end
-      dump_domain = @db.domain(domain)
+      dump_domain = db.domain(domain)
       logger.info "Preparing to dump domain #{dump_domain.name}"
-      dump = @db.make_dump(dump_domain, filename)
+      dump = db.make_dump(dump_domain, file)
       dump.chunk_size = params['chunk-size'].value
       count = dump.incomplete_count
-      logger.info "Dumping #{count} objects to #{filename}"
+      logger.info "Dumping #{count} objects to #{file}"
       pbar = progress ? ProgressBar.new("dump", count) : NullObject.new
       dump.callback = lambda do |item_name|
         logger.info "Dumped #{item_name}"
@@ -371,9 +447,42 @@ Main do
     mixin 'domain'
 
     def run
-      domain = @db.domain(params['domain'].value)
+      domain = db.domain(params['domain'].value)
       puts domain.count
     end
+  end
+
+  mode 'load' do
+    description 'Load a domain from a file'
+
+    mixin 'domain'
+
+    argument 'file' do
+      description 'The file to load from'
+      attr
+    end
+
+    def run
+      target_domain = if db.domain_exists?(domain)
+                        db.domain(domain)
+                      else
+                        logger.info "Creating domain #{domain}"
+                        db.create_domain(domain)
+                      end
+      say "About to load domain #{target_domain.name} from #{file}"
+      return unless agree("Are you sure you want to continue?")
+      load = db.make_load(target_domain, file)
+      count = load.incomplete_count
+      pbar = progress ? ProgressBar.new("load", count) : NullObject.new
+      load.callback = lambda do |item_name|
+        logger.info "Loaded #{item_name}"
+        pbar.inc
+      end
+      load.start!
+      pbar.finish
+      logger.info "Finished loading #{file} into #{domain}"
+    end
+
   end
 
   mode 'status' do
