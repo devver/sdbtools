@@ -66,6 +66,10 @@ module SimpleDB
       domain(domain_name)
     end
 
+    def delete_domain(domain_name)
+      @sdb.delete_domain(domain_name)
+    end
+
     def make_dump(domain, filename)
       Dump.new(domain, filename)
     end
@@ -182,7 +186,14 @@ module SimpleDB
 
     def report
       @status.transaction(true) do |status|
-        status.to_yaml
+        done     = status[:complete_items].size
+        not_done = status[:incomplete_items].size
+        puts "Items (not done/done): #{not_done}/#{done}"
+        status.roots.select{|root| root.kind_of?(Integer)}.each do |root|
+          pid = root
+          items = status[root][:working_items].size
+          puts "Process #{pid} working on #{items} items"
+        end
       end
     end
 
@@ -285,6 +296,12 @@ module SimpleDB
 
     def item_names
       map{|item_name, item| item_name}
+    end
+
+    def size
+      inject(0){|size, item_name, item|
+        size += 1
+      }
     end
 
     def each
@@ -390,7 +407,6 @@ Main do
       description 'The SimpleDB domain to work on'
       optional
     end
-
   end
 
   fattr(:domain) { 
@@ -411,6 +427,9 @@ Main do
   }
 
   def after_parse_parameters
+  end
+
+  def before_run
     stderr log
     logger log
     unless verbose
@@ -511,6 +530,32 @@ Main do
                     end
       task = SimpleDB::Task.new(status_file)
       puts task.report
+    end
+  end
+
+  mode 'info' do
+    description 'Show information about a dump file'
+
+    argument 'file' do
+      description 'The dump file to examine'
+      attr
+    end
+
+    def run
+      dump_file = SimpleDB::DumpFile.new(file)
+      puts "File #{file} contains #{dump_file.size} records"
+    end
+  end
+
+  mode 'delete-domain' do
+    mixin 'domain'
+
+    def run
+      description 'Delete a SimpleDB domain'
+      2.times do 
+        agree("Are you sure you want to delete #{params['domain'].value}?") # "
+      end
+      db.delete_domain(params['domain'].value)
     end
   end
 
