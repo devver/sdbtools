@@ -172,6 +172,12 @@ module SimpleDB
       }
     end
 
+    def failed_items
+      @status.transaction(true) do |status|
+        status[:failed_items]
+      end
+    end
+
     def reserve_items!(size)
       @status.transaction(false) do |status|
         chunk = status[:incomplete_items].slice!(0,size)
@@ -204,7 +210,8 @@ module SimpleDB
       @status.transaction(true) do |status|
         done     = status[:complete_items].size
         not_done = status[:incomplete_items].size
-        puts "Items (not done/done): #{not_done}/#{done}"
+        failed   = status[:failed_items].size
+        puts "Items (not done/done/failed): #{not_done}/#{done}/#{failed}"
         status.roots.select{|root| root.kind_of?(Integer)}.each do |root|
           pid = root
           items = status[root][:working_items].size
@@ -557,6 +564,12 @@ Main do
       attr
     end
 
+    option 'failed' do
+      description 'Show details about failed items'
+      default false
+      cast :bool
+    end
+
     def run
       self.title ||= choose(*Dir['*.simpledb_op_status'])
       status_file = if title =~ /\.simpledb_op_status$/
@@ -564,8 +577,17 @@ Main do
                     else
                       title + '.simpledb_op_status'
                     end
-      task = SimpleDB::Task.new(status_file)
-      puts task.report
+      task = SimpleDB::Task.new(status_file, logger)
+      if params['failed'].given?
+        task.failed_items.each do |item_name, info|
+          puts item_name + ": "
+          puts
+          puts info
+          puts "-" * 60
+        end
+      else
+        puts task.report
+      end
     end
   end
 
