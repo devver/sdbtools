@@ -144,9 +144,6 @@ module SimpleDB
       end
     end
 
-    fattr :callback    => lambda{}
-    fattr :chunk_size  => 100
-
     def session
       yield
     ensure
@@ -393,7 +390,7 @@ Main do
   option 'chunk-size', 'n' do
     description "The number of items to process at once"
     cast :int
-    default 10
+    default 100
   end
 
   option 'log' do
@@ -499,6 +496,7 @@ Main do
       say "About to load domain #{target_domain.name} from #{file}"
       return unless agree("Are you sure you want to continue?")
       load = db.make_load(target_domain, file)
+      load.chunk_size = params['chunk-size'].value
       count = load.incomplete_count
       pbar = progress ? ProgressBar.new("load", count, stdout) : NullObject.new
       load.callback = lambda do |item_name|
