@@ -17,6 +17,15 @@ require 'pathname'
 require 'fileutils'
 require 'yaml'
 
+at_exit do
+  if $!.kind_of?(Exception) && (!$!.kind_of?(SystemExit))
+    $stderr.puts <<"END"
+This program has encountered an error and cannot continue. Please see the log
+for details.
+END
+  end
+end
+
 module SimpleDB
   class Operation
     include Enumerable
@@ -43,6 +52,7 @@ module SimpleDB
   class Database
     def initialize(access_key=nil, secret_key=nil, options={})
       @sdb = RightAws::SdbInterface.new(access_key, secret_key, options)
+      @logger = options.fetch(:logger){::Logger.new($stderr)}
     end
 
     def domains
@@ -71,11 +81,11 @@ module SimpleDB
     end
 
     def make_dump(domain, filename)
-      Dump.new(domain, filename)
+      Dump.new(domain, filename, @logger)
     end
 
     def make_load(domain, filename)
-      Load.new(domain, filename)
+      Load.new(domain, filename, @logger)
     end
 
     private
@@ -89,6 +99,10 @@ module SimpleDB
       @name       = name
       @item_names = nil
       @count      = nil
+    end
+
+    def [](item_name)
+      @sdb.get_attributes(name, item_name)[:attributes]
     end
 
     def item_names
@@ -132,13 +146,15 @@ module SimpleDB
     fattr :callback    => lambda{}
     fattr :chunk_size  => 100
 
-    def initialize(status_file)
+    def initialize(status_file, logger)
+      @logger = logger
       @status_file = Pathname(status_file)
       @status = PStore.new(@status_file.to_s)
       unless @status_file.exist?
         initialize_status!(yield)
       end
       @status.transaction(false) do
+        @logger.info "Initializing #{@status_file} for PID #{$$}"
         @status[$$] = {}
         @status[$$][:working_items] = []
       end
@@ -160,6 +176,7 @@ module SimpleDB
       @status.transaction(false) do |status|
         chunk = status[:incomplete_items].slice!(0,size)
         status[$$][:working_items].concat(chunk)
+        @logger.info("Reserved #{chunk.size} items")
         chunk
       end
     end
@@ -169,11 +186,13 @@ module SimpleDB
         items.each do |item_name|
           status[:complete_items] << 
             status[$$][:working_items].delete(item_name)
+          @logger.info("Marked item #{item_name} complete")
         end
       end
     end
 
     def release_working_items!
+      @logger.info("Releasing working items")
       @status.transaction(false) do |status|
         items = status[$$][:working_items]
         status[:incomplete_items].concat(items)
@@ -195,20 +214,29 @@ module SimpleDB
     end
 
     private
+
+    def record_failed_item!(item_name, info)
+      @logger.info "Problem with item #{item_name}"
+      @status.transaction(false) do |status|
+        status[:failed_items] ||= {}
+        status[:failed_items][item_name] = info
+      end
+    end
     
     def initialize_status!(item_names)
       @status.transaction(false) do |status|
         status[:incomplete_items] = item_names
+        status[:failed_items]     = {}
         status[:complete_items]   = []
       end
     end
   end
 
   class Dump < Task
-    def initialize(domain, filename)
+    def initialize(domain, filename, logger)
       @domain                   = domain
       @dump_filename            = Pathname(filename)
-      super(status_filename) {
+      super(status_filename, logger) {
         @domain.item_names
       }
     end
@@ -233,11 +261,13 @@ module SimpleDB
     private
 
     def dump_items(items)
+      @logger.info "Dumping #{items.size} items to #{@dump_filename}"
       FileUtils.touch(@dump_filename) unless @dump_filename.exist?
       file = File.new(@dump_filename.to_s)
       file.flock(File::LOCK_EX)
       @dump_filename.open('a+') do |f|
         items.each_pair do |item_name, attributes|
+          @logger.info "Dumping item #{item_name}"
           YAML.dump({item_name => attributes}, f)
         end
       end
@@ -248,11 +278,11 @@ module SimpleDB
   end
 
   class Load < Task
-    def initialize(domain, filename)
+    def initialize(domain, filename, logger)
       @domain    = domain
       @dump_filename = Pathname(filename)
       @dump_file = DumpFile.new(filename)
-      super(status_filename) {
+      super(status_filename, logger) {
         @dump_file.item_names
       }
     end
@@ -274,7 +304,14 @@ module SimpleDB
             break if chunk.empty?
           end
           if reserved.include?(item_name)
-            @domain.put(item_name, attributes)
+            @logger.info("#{item_name} is reserved, loading to #{@domain.name}")
+            begin
+              @domain.put(item_name, attributes)
+            rescue
+              record_failed_item!(
+                item_name, 
+                "#{$!.class.name}: #{$!.message}")
+            end
             reserved.delete(item_name)
             callback.call(item_name)
           end
@@ -404,13 +441,14 @@ Main do
       description 'The SimpleDB domain to work on'
       optional
     end
+
+    fattr(:domain) { 
+      params['domain'].value || choose(*db.domains) do |q|
+        q.prompt = "Domain to operate on?"
+      end
+    }
   end
 
-  fattr(:domain) { 
-    params['domain'].value || choose(*db.domains) do |q|
-      q.prompt = "Domain to operate on?"
-    end
-  }
 
   fattr(:db) {
     SimpleDB::Database.new(
@@ -427,8 +465,8 @@ Main do
   end
 
   def before_run
-    stderr log
-    logger log
+    stderr 'sdbtool-errors.log'
+    logger ::Logger.new(log)
     unless verbose
       logger.level = ::Logger::WARN
     end
@@ -546,14 +584,28 @@ Main do
   end
 
   mode 'delete-domain' do
+    description "Delete a SimpleDB domain"
     mixin 'domain'
 
     def run
       description 'Delete a SimpleDB domain'
       2.times do 
-        agree("Are you sure you want to delete #{params['domain'].value}?") # "
+        return unless agree("Are you sure you want to delete #{params['domain'].value}?") # "
       end
       db.delete_domain(params['domain'].value)
+    end
+  end
+
+  mode 'show' do
+    description "Show a single SimpleDB item"
+    mixin 'domain'
+
+    argument 'item_name' do
+      description "The name of the item to show"
+    end
+
+    def run
+      puts db.domain(domain)[params['item_name'].value].to_yaml
     end
   end
 
