@@ -379,6 +379,12 @@ Main do
     default 10
   end
 
+  option 'log' do
+    description 'File to log to'
+    default 'sdbtool.log'
+    attr
+  end
+
   mixin 'domain' do
     argument 'domain' do
       description 'The SimpleDB domain to work on'
@@ -405,6 +411,8 @@ Main do
   }
 
   def after_parse_parameters
+    stderr log
+    logger log
     unless verbose
       logger.level = ::Logger::WARN
     end
@@ -431,7 +439,7 @@ Main do
       dump.chunk_size = params['chunk-size'].value
       count = dump.incomplete_count
       logger.info "Dumping #{count} objects to #{file}"
-      pbar = progress ? ProgressBar.new("dump", count) : NullObject.new
+      pbar = progress ? ProgressBar.new("dump", count,stdout) : NullObject.new
       dump.callback = lambda do |item_name|
         logger.info "Dumped #{item_name}"
         pbar.inc
@@ -473,7 +481,7 @@ Main do
       return unless agree("Are you sure you want to continue?")
       load = db.make_load(target_domain, file)
       count = load.incomplete_count
-      pbar = progress ? ProgressBar.new("load", count) : NullObject.new
+      pbar = progress ? ProgressBar.new("load", count, stdout) : NullObject.new
       load.callback = lambda do |item_name|
         logger.info "Loaded #{item_name}"
         pbar.inc
