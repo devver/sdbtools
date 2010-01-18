@@ -13,7 +13,12 @@ END
     gem.email = "devs@devver.net"
     gem.homepage = "http://github.com/devver/sdbtools"
     gem.authors = ["Avdi Grimm"]
-    gem.add_dependency "right_aws", "~> 1.10"
+    gem.add_dependency "right_aws",   "~> 1.10"
+    gem.add_dependency 'main',        '~> 4.2'
+    gem.add_dependency 'fattr',       '~> 2.1'
+    gem.add_dependency 'highline',    '~> 1.5'
+    gem.add_dependency 'progressbar', '~> 0.0.3'
+    gem.add_dependency 'libxml-ruby', '~> 1.1'
     gem.add_development_dependency "rspec", ">= 1.2.9"
   end
   Jeweler::GemcutterTasks.new

@@ -131,7 +131,7 @@ Main do
 
 
   fattr(:db) {
-    SimpleDB::Database.new(
+    SDBTools::Database.new(
       access_key,
       secret_key,
       :server => params['server'].value,
@@ -250,7 +250,7 @@ Main do
                     else
                       title + '.simpledb_op_status'
                     end
-      task = SimpleDB::Task.new(status_file, logger)
+      task = SDBTools::Task.new(status_file, logger)
       if params['failed'].given?
         task.failed_items.each do |item_name, info|
           puts item_name + ": "
@@ -273,7 +273,7 @@ Main do
     end
 
     def run
-      dump_file = SimpleDB::DumpFile.new(file)
+      dump_file = SDBTools::DumpFile.new(file)
       puts "File #{file} contains #{dump_file.size} records"
     end
   end

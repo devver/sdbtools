@@ -1,7 +1,7 @@
 require 'fattr'
 require 'right_aws'
 
-module SimpleDB
+module SDBTools
   class Operation
     include Enumerable
 
