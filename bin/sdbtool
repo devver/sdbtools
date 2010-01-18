@@ -283,11 +283,20 @@ Main do
     mixin 'domain'
 
     def run
-      description 'Delete a SimpleDB domain'
       2.times do 
         return unless agree("Are you sure you want to delete #{params['domain'].value}?") # "
       end
       db.delete_domain(params['domain'].value)
+    end
+  end
+
+  mode 'create-domain' do
+    description "Create a SimpleDB domain"
+
+    mixin 'domain'
+
+    def run
+      db.create_domain(params['domain'].value)
     end
   end
 
