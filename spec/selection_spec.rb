@@ -93,6 +93,24 @@ module SDBTools
 
     end                         # "
 
+    context "with a limit of :none" do
+      before :each do
+        @it = Selection.new(@sdb, "DOMAIN",
+          :attributes => [:foo, :bar], 
+          :conditions => ["foo == 'bar'"],
+          :limit      => :none)
+      end
+
+      it "should append a limit clause" do
+        @it.to_s.should be == "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' LIMIT 250"
+      end
+
+      it "should be able to generate a count expression" do
+        @it.count_expression.should be == 
+          "SELECT count(*) FROM DOMAIN WHERE foo == 'bar'"
+      end
+    end
+
     context "with a limit" do
       before :each do
         @it = Selection.new(@sdb, "DOMAIN",
@@ -106,8 +124,81 @@ module SDBTools
       end
 
       it "should be able to generate a count expression" do
-        @it.count_expression.should be == "SELECT count(*) FROM DOMAIN WHERE foo == 'bar'"
+        @it.count_expression.should be == 
+          "SELECT count(*) FROM DOMAIN WHERE foo == 'bar' LIMIT 10"
       end
+
+      it "should limit results" do
+        results = select_results(Array.new(100, "foo"))
+        @sdb.stub!(:select).and_return(results)
+        @it.to_a.size.should == 10
+      end
+    end
+
+    context "ordered by an attribute" do
+      before :each do
+        @it = Selection.new(@sdb, "DOMAIN",
+          :attributes      => [:foo, :bar], 
+          :conditions      => ["foo == 'bar'"],
+          :order_by        => "foo")
+      end
+
+      it "should append an order clause" do
+        @it.to_s.should be == 
+          "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' ORDER BY foo ASC"
+      end
+
+      it "should be able to generate a count expression" do
+        @it.count_expression.should be == 
+          "SELECT count(*) FROM DOMAIN WHERE foo == 'bar' ORDER BY foo ASC"
+      end
+    end
+
+    context "in descending order" do
+      before :each do
+        @it = Selection.new(@sdb, "DOMAIN",
+          :attributes      => [:foo, :bar], 
+          :conditions      => ["foo == 'bar'"],
+          :order_by        => "foo",
+          :order           => :descending)
+      end
+
+      it "should append an order clause" do
+        @it.to_s.should be == 
+          "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' ORDER BY foo DESC"
+      end
+
+      it "should be able to generate a count expression" do
+        @it.count_expression.should be == 
+          "SELECT count(*) FROM DOMAIN WHERE foo == 'bar' ORDER BY foo DESC"
+      end
+
+      it "should be able to generate an offset count expression" do
+        @it.offset_count_expression.should be == 
+          "SELECT count(*) FROM DOMAIN WHERE foo == 'bar' ORDER BY foo DESC LIMIT 0"
+      end
+
+      context "with a limit" do
+        before :each do
+          @it.limit = 250
+        end
+        
+        specify { @it.to_s.should be == 
+          "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' ORDER BY foo DESC LIMIT 250"
+        }
+      end
+    end
+
+    # We can't yet support large limits. In order to do so, it will be necessary
+    # to implement limit chunking, where the limit is split across multiple
+    # requests of 250 items and a final request of limit % 250 items.
+    it "should reject limits > 250" do
+      lambda do
+        Selection.new(@sdb, "DOMAIN", :limit => 251) 
+      end.should raise_error
+      lambda do
+        Selection.new(@sdb, "DOMAIN").limit = 251
+      end.should raise_error
     end
 
     context "with an offset" do

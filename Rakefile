@@ -19,6 +19,7 @@ END
     gem.add_dependency 'highline',    '~> 1.5'
     gem.add_dependency 'progressbar', '~> 0.0.3'
     gem.add_dependency 'libxml-ruby', '~> 1.1'
+    gem.add_dependency 'arrayfields', '~> 4.7'
     gem.add_development_dependency "rspec", ">= 1.2.9"
   end
   Jeweler::GemcutterTasks.new
