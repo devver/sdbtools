@@ -1,5 +1,6 @@
 require 'fattr'
 require 'right_aws'
+require File.expand_path('selection', File.dirname(__FILE__))
 
 module SDBTools
 
@@ -8,16 +9,21 @@ module SDBTools
   class Operation
     include Enumerable
 
+    attr_reader :method
+    attr_reader :args
+    attr_reader :starting_token
+
     def initialize(sdb, method, *args)
       @options = args.last.is_a?(Hash) ? args.pop : {}
       @sdb     = sdb
       @method  = method
       @args    = args
+      @starting_token = @options[:starting_token]
     end
 
     # Yields once for each result set, until there is no next token.
     def each
-      next_token = @options[:starting_token]
+      next_token = starting_token
       begin
         args = @args.dup
         args << next_token
