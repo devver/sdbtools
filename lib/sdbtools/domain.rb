@@ -24,11 +24,7 @@ module SDBTools
 
     def count
       return @count if @count
-      op = Operation.new(@sdb, :select, "select count(*) from #{name}")
-      @count = op.inject(0) {|count, results|
-        count += results[:items].first["Domain"]["Count"].first.to_i
-        count
-      }
+      @count = selection.count
     end
 
     def items(item_names)
@@ -53,6 +49,7 @@ module SDBTools
       Selection.new(@sdb, name, options)
     end
 
+    # Somewhat deprecated. Use #selection() instead
     def select(query)
       op = Operation.new(@sdb, :select, "select * from #{name} where #{query}")
       op.inject([]){|items,results|

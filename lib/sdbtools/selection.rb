@@ -37,7 +37,7 @@ module SDBTools
       @sdb        = sdb
       @domain     = domain.to_s
       @attributes = options.fetch(:attributes) { :all }
-      @conditions = Array(options[:conditions])
+      @conditions = options[:conditions].to_s
       @order      = options.fetch(:order) { :ascending }
       @order_by   = options.fetch(:order_by) { :none }
       @order_by   = @order_by.to_s unless @order_by == :none
@@ -59,9 +59,11 @@ module SDBTools
     end
 
     def count
-      @count ||= count_operation.inject(0){|count, results| 
-        count += results[:items].first["Domain"]["Count"].first.to_i
-      }
+      Transaction.open(count_expression) do |t|
+        @count ||= count_operation.inject(0){|count, results| 
+          count += results[:items].first["Domain"]["Count"].first.to_i
+        }
+      end
     end
 
     alias_method :size, :count
@@ -148,26 +150,7 @@ module SDBTools
     end
 
     def match_expression
-      case conditions.size
-      when 0 then ""
-      else " WHERE #{prepared_conditions.join(' ')}"
-      end
-    end
-
-    def prepared_conditions
-      conditions.map { |condition|
-        case condition
-        when String then condition
-        when Array then
-          values   = condition.dup
-          template = values.shift.to_s
-          template.gsub(/\?/) {|match|
-            quote_value(values.shift.to_s)
-          }
-        else
-          raise ScriptError, "Bad condition: #{condition.inspect}"
-        end
-      }
+      if conditions.empty? then "" else " WHERE #{conditions}" end
     end
 
     def limit_clause

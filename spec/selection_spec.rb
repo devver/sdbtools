@@ -80,10 +80,7 @@ module SDBTools
       before :each do
         @it = Selection.new(@sdb, "DOMAIN", 
           :attributes => ["attr foo", "bar"],
-          :conditions => [
-            'bar == "buz"', 
-            "AND",
-            ['`attr foo` between ? and ?', 4, '1"2']])
+          :conditions => 'bar == "buz" AND `attr foo` between "4" and "1""2"')
       end
 
       it "should format quote and interpolate the conditions" do
