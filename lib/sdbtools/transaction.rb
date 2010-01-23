@@ -24,7 +24,11 @@ module SDBTools
 
     # Get the default on_close action
     def self.on_close
-      @on_close_action ||= lambda{|t|}
+      if current
+        current.on_close
+      else
+        @on_close_action ||= lambda{|t|}
+      end
     end
 
     # Usage:
@@ -61,13 +65,14 @@ module SDBTools
     attr_reader :request_count
     attr_reader :item_count
     attr_reader :times
+    attr_reader :on_close
 
-    def initialize(description, on_close=self.class.on_close)
+    def initialize(description, on_close_action=self.class.on_close)
       @description   = description
       @box_usage     = 0.0
       @request_count = 0
       @item_count    = 0
-      @on_close      = on_close
+      @on_close      = on_close_action
       @times         = Benchmark::Tms.new
     end
 

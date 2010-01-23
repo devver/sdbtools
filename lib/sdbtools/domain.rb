@@ -41,8 +41,13 @@ module SDBTools
       }
     end
 
-    def put(item_name, attributes)
-      @sdb.put_attributes(@name, item_name, attributes)
+    def get(item_name, attribute_name=nil)
+      @sdb.get_attributes(@name, item_name, attribute_name)
+    end
+
+    def put(item_name, attributes, options={})
+      replace = options[:replace] ? :replace : false
+      @sdb.put_attributes(@name, item_name, attributes, replace)
     end
 
     def selection(options={})
@@ -62,8 +67,8 @@ module SDBTools
       }
     end
 
-    def delete(item_name)
-      @sdb.delete_attributes(@name, item_name)
+    def delete(item_name, attributes={})
+      @sdb.delete_attributes(@name, item_name, attributes)
     end
   end
 end

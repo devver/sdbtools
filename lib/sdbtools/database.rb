@@ -5,8 +5,10 @@ module SDBTools
 
     def initialize(access_key=nil, secret_key=nil, options={})
       @logger = (options[:logger] ||= ::Logger.new($stderr))
-      @sdb    = MeasuredSdbInterface.new(
-        RightAws::SdbInterface.new(access_key, secret_key, options))
+      @sdb    =         MeasuredSdbInterface.new(
+        options.delete(:sdb_interface) {
+          RightAws::SdbInterface.new(access_key, secret_key, options)
+        })
     end
 
     def domains
