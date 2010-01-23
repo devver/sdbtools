@@ -21,6 +21,18 @@ module SDBTools
     # For testing
     attr_writer :starting_token
 
+    def self.quote_name(name)
+      if name.to_s =~ /^[A-Z$_][A-Z0-9$_]*$/i
+        name.to_s
+      else
+        "`" + name.to_s.gsub("`", "``") + "`"
+      end
+    end
+
+    def self.quote_value(value)
+      '"' + value.to_s.gsub(/"/, '""') + '"'
+    end
+
     def initialize(sdb, domain, options={})
       @sdb        = sdb
       @domain     = domain.to_s
@@ -118,15 +130,11 @@ module SDBTools
     private
 
     def quote_name(name)
-      if name.to_s =~ /^[A-Z$_][A-Z0-9$_]*$/i
-        name.to_s
-      else
-        "`" + name.to_s.gsub("`", "``") + "`"
-      end
+      self.class.quote_name(name)
     end
 
     def quote_value(value)
-      '"' + value.to_s.gsub(/"/, '""') + '"'
+      self.class.quote_value(value)
     end
 
     def output_list
