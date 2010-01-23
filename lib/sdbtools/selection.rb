@@ -69,12 +69,14 @@ module SDBTools
 
     def each
       return if limit == 0
-      num_items = 0
-      select_operation.each do |results|
-        results[:items].each do |item|
-          yield(item.keys.first, item.values.first)
-          num_items += 1
-          return if limit != :none && num_items >= limit
+      Transaction.open(to_s) do
+        num_items = 0
+        select_operation.each do |results|
+          results[:items].each do |item|
+            yield(item.keys.first, item.values.first)
+            num_items += 1
+            return if limit != :none && num_items >= limit
+          end
         end
       end
     end

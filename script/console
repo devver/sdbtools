@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+require 'logger'
+require 'irb'
+
+require File.expand_path('../lib/sdbtools', File.dirname(__FILE__))
+include SDBTools
+Transaction.on_close = Transaction.log_transaction_close(::Logger.new($stderr))
+IRB.start
