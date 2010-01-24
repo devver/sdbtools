@@ -24,7 +24,7 @@ module SDBTools
           args = @args.dup
           args << next_token
           results = @sdb.send(@method, *args)
-          yield(results)
+          yield(results, self)
           next_token = results[:next_token]
         end while next_token
       end

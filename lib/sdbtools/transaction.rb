@@ -33,18 +33,20 @@ module SDBTools
 
     # Usage:
     #   Transaction.on_close = Transaction.log_transaction_close(logger)
-    def self.log_transaction_close(logger)
+    def self.log_transaction_close(logger, cutoff_level=:none)
       pattern = "%s \"%s\" (User %0.6u; System %0.6y; CPU %0.6t; Clock %0.6r; Box %0.6f; Reqs %d; Items %d)"
       lambda do |t|
-        prefix = "*" * (transaction_stack.size + 1)
-        logger.info(
-          t.times.format(
-            pattern,
-            prefix, 
-            t.description, 
-            t.box_usage, 
-            t.request_count, 
-            t.item_count))
+        if cutoff_level == :none || cutoff_level <= t.nesting_level
+          prefix = "*" * (t.nesting_level + 1)
+          logger.info(
+            t.times.format(
+              pattern,
+              prefix, 
+              t.description,
+              t.box_usage, 
+              t.request_count, 
+              t.item_count))
+        end
       end
     end
 
@@ -66,6 +68,7 @@ module SDBTools
     attr_reader :item_count
     attr_reader :times
     attr_reader :on_close
+    attr_reader :nesting_level
 
     def initialize(description, on_close_action=self.class.on_close)
       @description   = description
@@ -74,6 +77,7 @@ module SDBTools
       @item_count    = 0
       @on_close      = on_close_action
       @times         = Benchmark::Tms.new
+      @nesting_level = self.class.transaction_stack.size
     end
 
     def close

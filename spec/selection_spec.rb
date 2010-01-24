@@ -99,7 +99,7 @@ module SDBTools
       end
 
       it "should append a limit clause" do
-        @it.to_s.should be == "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' LIMIT 250"
+        @it.to_s.should be == "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar'"
       end
 
       it "should be able to generate a count expression" do
@@ -129,6 +129,38 @@ module SDBTools
         results = select_results(Array.new(100, "foo"))
         @sdb.stub!(:select).and_return(results)
         @it.to_a.size.should == 10
+      end
+    end
+
+    context "with a high limit" do
+      before :each do
+        @it = Selection.new(@sdb, "DOMAIN",
+          :attributes => [:foo, :bar], 
+          :conditions => ["foo == 'bar'"],
+          :limit      => 251,
+          :batch_limit => 250)
+      end
+
+      it "should append a limit clause" do
+        @it.to_s.should be == "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' LIMIT 250"
+      end
+
+      it "should be able to generate a count expression" do
+        @it.count_expression.should be == 
+          "SELECT count(*) FROM DOMAIN WHERE foo == 'bar' LIMIT 251"
+      end
+
+      it "should limit results" do
+        @sdb = stub("SDB")
+        @sdb.should_receive(:select).
+          with("SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' LIMIT 250", nil).
+          and_return(select_results(("1".."250"), "TOKEN1"))
+        @sdb.should_receive(:select).
+          with("SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' LIMIT 1", "TOKEN1").
+          and_return(select_results(["251"], nil))
+        @it.sdb = @sdb
+        @it.results.size.should == 251
+        @it.results.keys.should == ("1".."251").to_a
       end
     end
 
@@ -177,11 +209,11 @@ module SDBTools
 
       context "with a limit" do
         before :each do
-          @it.limit = 250
+          @it.limit = 12
         end
         
         specify { @it.to_s.should be == 
-          "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' ORDER BY foo DESC LIMIT 250"
+          "SELECT foo, bar FROM DOMAIN WHERE foo == 'bar' ORDER BY foo DESC LIMIT 12"
         }
       end
     end
@@ -189,12 +221,12 @@ module SDBTools
     # We can't yet support large limits. In order to do so, it will be necessary
     # to implement limit chunking, where the limit is split across multiple
     # requests of 250 items and a final request of limit % 250 items.
-    it "should reject limits > 250" do
+    it "should reject batch limits > 250" do
       lambda do
-        Selection.new(@sdb, "DOMAIN", :limit => 251) 
+        Selection.new(@sdb, "DOMAIN", :batch_limit => 251) 
       end.should raise_error
       lambda do
-        Selection.new(@sdb, "DOMAIN").limit = 251
+        Selection.new(@sdb, "DOMAIN").batch_limit = 251
       end.should raise_error
     end
 
@@ -270,10 +302,10 @@ module SDBTools
       it "should be able to get selection results" do
         @sdb = stub("SDB")
         @sdb.should_receive(:select).
-          with(@it.to_s, "TOKEN2").
+          with(@it.to_s(10,0), "TOKEN2").
           and_return(select_results(["foo", "bar"], "TOKEN5"))
         @sdb.should_receive(:select).
-          with(@it.to_s, "TOKEN5").
+          with(@it.to_s(10,2), "TOKEN5").
           and_return(select_results(["baz", "buz"], nil))
         @it.sdb = @sdb
         @it.starting_token = "TOKEN2"

@@ -16,5 +16,15 @@ module SDBTools
         @it.each do break; end
       end
     end
+
+    it "should pass itself into the given block" do
+      op = :unset
+      @sdb.stub!(:select).and_return({})
+      @it = Operation.new(@sdb, :select, "ARG")
+      op = @it.each do |results, operation|
+        break operation
+      end
+      op.should equal(@it)
+    end
   end
 end
