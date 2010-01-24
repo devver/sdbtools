@@ -77,8 +77,8 @@ module SDBTools
 
     def each
       return if limit == 0
+      num_items = 0
       Transaction.open(to_s) do
-        num_items = 0
         select_operation(limit, num_items).each do |results, operation|
           results[:items].each do |item|
             yield(item.keys.first, item.values.first)
@@ -87,6 +87,12 @@ module SDBTools
           end
           operation.args[0] = to_s(limit, num_items)
         end
+      end
+    rescue RightAws::AwsError => error
+      if error.message =~ /InvalidQueryExpression/
+        raise error, error.message.to_s + " (#{to_s(limit, num_items)})", error.backtrace
+      else
+        raise
       end
     end
 

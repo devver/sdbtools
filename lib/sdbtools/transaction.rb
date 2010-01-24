@@ -94,6 +94,7 @@ module SDBTools
     end
 
     def add_stats_from_aws_response(response)
+      response   = response.nil? ? {} : response
       box_usage  = response[:box_usage].to_f
       item_count = Array(response[:items]).size + Array(response[:domains]).size
       item_count += 1 if response.key?(:attributes)

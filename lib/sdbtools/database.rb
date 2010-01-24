@@ -13,7 +13,7 @@ module SDBTools
 
     def domains
       domains_op = Operation.new(@sdb, :list_domains, nil)
-      domains_op.inject([]) {|domains, results|
+      domains_op.inject([]) {|domains, (results, operation)|
         domains.concat(results[:domains])
         domains
       }

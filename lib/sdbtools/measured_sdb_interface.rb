@@ -34,7 +34,7 @@ module SDBTools
     end
 
     def select(*args, &block)
-      Transaction.open("select") do |t|
+      Transaction.open("select #{args.first}") do |t|
         t.measure_aws_call{super(*args, &block)}
       end
     end

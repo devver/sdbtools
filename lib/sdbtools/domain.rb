@@ -57,7 +57,7 @@ module SDBTools
     # Somewhat deprecated. Use #selection() instead
     def select(query)
       op = Operation.new(@sdb, :select, "select * from #{name} where #{query}")
-      op.inject([]){|items,results|
+      op.inject([]){|items,(results, operation)|
         batch_items = results[:items].map{|pair|
           item = pair.values.first
           item.merge!({'itemName()' => pair.keys.first})
