@@ -1,5 +1,5 @@
 require 'fattr'
-require 'right_aws'
+require 'aws'
 $:.unshift(File.expand_path(File.dirname(__FILE__)))
 require 'sdbtools/operation'
 require 'sdbtools/database'

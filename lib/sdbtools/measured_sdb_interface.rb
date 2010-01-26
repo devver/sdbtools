@@ -2,7 +2,7 @@ require 'sdbtools/transaction'
 require 'delegate'
 
 module SDBTools
-  class MeasuredSdbInterface < DelegateClass(RightAws::SdbInterface)
+  class MeasuredSdbInterface < DelegateClass(Aws::SdbInterface)
     def create_domain(*args, &block)
       Transaction.open("create_domain") do |t|
         t.measure_aws_call{super(*args, &block)}

@@ -7,7 +7,7 @@ module SDBTools
       @logger = (options[:logger] ||= ::Logger.new($stderr))
       @sdb    =         MeasuredSdbInterface.new(
         options.delete(:sdb_interface) {
-          RightAws::SdbInterface.new(access_key, secret_key, options)
+          Aws::SdbInterface.new(access_key, secret_key, options)
         })
     end
 

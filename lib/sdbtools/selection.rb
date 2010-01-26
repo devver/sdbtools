@@ -88,7 +88,7 @@ module SDBTools
           operation.args[0] = to_s(limit, num_items)
         end
       end
-    rescue RightAws::AwsError => error
+    rescue Aws::AwsError => error
       if error.message =~ /InvalidQueryExpression/
         raise error, error.message.to_s + " (#{to_s(limit, num_items)})", error.backtrace
       else

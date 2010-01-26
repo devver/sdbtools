@@ -13,7 +13,7 @@ END
     gem.email = "devs@devver.net"
     gem.homepage = "http://github.com/devver/sdbtools"
     gem.authors = ["Avdi Grimm"]
-    gem.add_dependency "right_aws",   "~> 1.10"
+    gem.add_dependency "aws",         "~> 2.1"
     gem.add_dependency 'main',        '~> 4.2'
     gem.add_dependency 'fattr',       '~> 2.1'
     gem.add_dependency 'arrayfields', '~> 4.7'

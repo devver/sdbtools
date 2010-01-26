@@ -1,16 +1,9 @@
 #!/usr/bin/env ruby
 
-gem 'main',        '~> 4.2'
-gem 'fattr',       '~> 2.1'
-gem 'highline',    '~> 1.5'
-gem 'right_aws',   '~> 1.10'
-gem 'progressbar', '~> 0.0.3'
-gem 'libxml-ruby', '~> 1.1'
-
 require 'main'
 require 'highline/import'
 require 'fattr'
-require 'right_aws'
+require 'aws'
 require 'progressbar'
 require 'pstore'
 require 'pathname'
@@ -40,7 +33,7 @@ Main do
 
   def initialize
     HighLine.track_eof = false
-    RightAws::RightAWSParser.xml_lib = 'libxml'
+    Aws::RightAWSParser.xml_lib = 'libxml'
   end
 
   def timestamp
