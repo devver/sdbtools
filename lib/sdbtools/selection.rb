@@ -38,7 +38,7 @@ module SDBTools
       @sdb             = sdb
       @domain          = domain.to_s
       @attributes      = options.fetch(:attributes) { :all }
-      @conditions      = options[:conditions].to_s
+      @conditions      = options[:conditions]
       @order           = options.fetch(:order) { :ascending }
       @order_by        = options.fetch(:order_by) { :none }
       @order_by        = @order_by.to_s unless @order_by == :none
@@ -169,7 +169,14 @@ module SDBTools
     end
 
     def match_expression
-      if conditions.empty? then "" else " WHERE #{conditions}" end
+      return "" if !conditions || conditions.empty? 
+
+      case conditions
+      when Array
+        " WHERE #{conditions.join(" AND ")}"
+      else
+        " WHERE #{conditions}"
+      end
     end
 
     def limit_clause(query_limit=:none, offset=0)
